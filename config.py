@@ -22,6 +22,9 @@ OPENAI_TTS_INSTRUCTIONS = os.environ.get(
 
 OPENCLAW_BASE_URL = os.environ.get("OPENCLAW_BASE_URL", "http://localhost:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
+TTS_BASE_URL = os.environ.get("TTS_BASE_URL", OPENCLAW_BASE_URL)
+TTS_API_TOKEN = os.environ.get("TTS_API_TOKEN", OPENCLAW_TOKEN or OPENAI_API_KEY)
+TTS_HTTP_PATH = os.environ.get("TTS_HTTP_PATH", "/v1/audio/speech")
 
 AUDIO_DEVICE = os.environ.get("AUDIO_DEVICE", "plughw:1,0")
 AUDIO_OUTPUT_DEVICE = os.environ.get("AUDIO_OUTPUT_DEVICE", "default")
@@ -50,6 +53,9 @@ def print_config():
     print(f"OPENAI_TTS_VOICE        = {OPENAI_TTS_VOICE}")
     print(f"OPENAI_TTS_SPEED        = {OPENAI_TTS_SPEED}")
     print(f"OPENAI_TTS_GAIN_DB      = {OPENAI_TTS_GAIN_DB}")
+    print(f"TTS_BASE_URL            = {TTS_BASE_URL}")
+    print(f"TTS_HTTP_PATH           = {TTS_HTTP_PATH}")
+    print(f"TTS_API_TOKEN set       = {bool(TTS_API_TOKEN)}")
     print(f"OPENAI_TTS_INSTRUCTIONS = {OPENAI_TTS_INSTRUCTIONS[:60]}...")
     print(f"OPENCLAW_BASE_URL       = {OPENCLAW_BASE_URL}")
     print(f"AUDIO_DEVICE            = {AUDIO_DEVICE}")

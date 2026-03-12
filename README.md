@@ -1,19 +1,19 @@
 # pizero-openclaw
 
-A voice-controlled AI assistant built on a Raspberry Pi Zero W with a [PiSugar WhisPlay board](https://www.pisugar.com). Press a button, speak, and get a streamed response on the LCD — powered by [OpenClaw](https://openclaw.ai) and OpenAI.
+A voice-controlled AI assistant built on a Raspberry Pi Zero W with a [PiSugar WhisPlay board](https://www.pisugar.com). Press a button, speak, and get a streamed response on the LCD — powered by [OpenClaw](https://openclaw.ai) and OpenAI speech-to-text.
 
 ## How it works
 
 ```
 Button press → Record audio → Transcribe (OpenAI) → Stream LLM response (OpenClaw) → Display on LCD
-                                                                                    → Speak aloud (OpenAI TTS, optional)
+                                                                                    → Speak aloud (gateway TTS, optional)
 ```
 
 1. **Press & hold** the button to record your voice via ALSA
 2. **Release** — the WAV is sent to OpenAI for transcription (~0.7s)
 3. The transcript (with conversation history) is streamed to an **OpenClaw gateway** for a response
 4. Text streams onto the **LCD** in real time with pixel-accurate word wrapping
-5. Optionally **speaks the response** via OpenAI TTS as sentences complete
+5. Optionally **speaks the response** via a TTS endpoint as sentences complete
 6. The idle screen shows a **clock, date, battery %, and WiFi status**
 
 The device maintains **conversation memory** across exchanges and includes a **silence gate** to skip empty recordings.
@@ -30,8 +30,9 @@ The device maintains **conversation memory** across exchanges and includes a **s
 
 - Raspberry Pi OS (Bookworm or later)
 - Python 3.11+
-- An [OpenAI API key](https://platform.openai.com/api-keys) for speech-to-text (and optionally TTS)
+- An [OpenAI API key](https://platform.openai.com/api-keys) for speech-to-text
 - An [OpenClaw](https://openclaw.ai) gateway running somewhere accessible on your network
+- Optional: a TTS endpoint exposed by the OpenClaw gateway or another machine on your LAN
 
 ### Install dependencies
 
@@ -55,6 +56,9 @@ Edit `.env`:
 ```bash
 export OPENAI_API_KEY="sk-your-openai-api-key"
 export OPENCLAW_TOKEN="your-openclaw-gateway-token"
+export OPENCLAW_BASE_URL="http://your-openclaw-host:18789"
+export TTS_BASE_URL="http://your-mac-mini:18790"
+export TTS_API_TOKEN="your-openclaw-gateway-token"
 ```
 
 ### Run
@@ -71,11 +75,14 @@ All settings are configured via environment variables (loaded from `.env`):
 
 | Variable | Default | Description |
 |---|---|---|
-| `OPENAI_API_KEY` | _(required)_ | OpenAI API key for transcription and TTS |
+| `OPENAI_API_KEY` | _(required)_ | OpenAI API key for transcription |
 | `OPENCLAW_TOKEN` | _(required)_ | Auth token for the OpenClaw gateway |
 | `OPENCLAW_BASE_URL` | `https://...` | OpenClaw gateway URL |
+| `TTS_BASE_URL` | `OPENCLAW_BASE_URL` | Base URL for the TTS endpoint |
+| `TTS_API_TOKEN` | `OPENCLAW_TOKEN` | Auth token for the TTS endpoint |
+| `TTS_HTTP_PATH` | `/v1/audio/speech` | TTS endpoint path |
 | `OPENAI_TRANSCRIBE_MODEL` | `gpt-4o-mini-transcribe` | Speech-to-text model |
-| `ENABLE_TTS` | `false` | Speak responses aloud via OpenAI TTS |
+| `ENABLE_TTS` | `false` | Speak responses aloud via the configured TTS endpoint |
 | `OPENAI_TTS_MODEL` | `tts-1` | TTS model |
 | `OPENAI_TTS_VOICE` | `alloy` | TTS voice |
 | `OPENAI_TTS_SPEED` | `2.0` | TTS speed (0.25–4.0) |
@@ -106,6 +113,27 @@ sudo journalctl -u pizero-openclaw -f
 cat /tmp/openclaw.log
 ```
 
+## Run a macOS `say` TTS service
+
+On the Mac mini:
+
+```bash
+export TTS_API_TOKEN="your-openclaw-gateway-token"
+export TTS_PORT="18790"
+export TTS_VOICE="Tingting"
+python3 mac_say_tts_server.py
+```
+
+On the Pi:
+
+```bash
+export ENABLE_TTS="true"
+export TTS_BASE_URL="http://your-mac-mini:18790"
+export TTS_API_TOKEN="your-openclaw-gateway-token"
+```
+
+The server exposes `POST /v1/audio/speech`, accepts an OpenAI-compatible JSON body, and returns `audio/wav`.
+
 ## Project structure
 
 ```
@@ -113,7 +141,8 @@ main.py               — Entry point and orchestrator
 display.py            — LCD rendering (status, responses, idle clock, spinner)
 openclaw_client.py    — Streaming HTTP client for the OpenClaw gateway
 transcribe_openai.py  — Speech-to-text via OpenAI API
-tts_openai.py         — Text-to-speech via OpenAI API + ALSA playback
+tts_openai.py         — Text-to-speech via gateway endpoint + ALSA playback
+mac_say_tts_server.py — Minimal macOS `say` TTS server for `/v1/audio/speech`
 record_audio.py       — Audio recording via ALSA arecord
 button_ptt.py         — Push-to-talk button state machine
 config.py             — Centralized configuration from .env

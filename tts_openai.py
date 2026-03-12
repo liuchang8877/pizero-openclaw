@@ -1,4 +1,4 @@
-"""OpenAI TTS playback with pre-fetching for gapless sentence transitions."""
+"""Gateway-backed TTS playback with pre-fetching for gapless sentence transitions."""
 
 import math
 import queue
@@ -133,11 +133,12 @@ class TTSPlayer:
                 print(f"[tts] skipping sentence (fetch failed): {text[:40]}")
 
     def _fetch_wav(self, text: str) -> bytes | None:
-        url = "https://api.openai.com/v1/audio/speech"
+        url = f"{config.TTS_BASE_URL.rstrip('/')}{config.TTS_HTTP_PATH}"
         headers = {
-            "Authorization": f"Bearer {config.OPENAI_API_KEY}",
             "Content-Type": "application/json",
         }
+        if config.TTS_API_TOKEN:
+            headers["Authorization"] = f"Bearer {config.TTS_API_TOKEN}"
         payload = {
             "model": config.OPENAI_TTS_MODEL,
             "voice": config.OPENAI_TTS_VOICE,
@@ -150,7 +151,7 @@ class TTSPlayer:
         try:
             resp = requests.post(url, json=payload, headers=headers, stream=True, timeout=30)
         except Exception as e:
-            print(f"[tts] request failed: {e}")
+            print(f"[tts] request failed ({url}): {e}")
             return None
         if resp.status_code != 200:
             print(f"[tts] API error {resp.status_code}: {resp.text[:200]}")

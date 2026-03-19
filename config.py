@@ -22,6 +22,13 @@ OPENAI_TTS_INSTRUCTIONS = os.environ.get(
 
 OPENCLAW_BASE_URL = os.environ.get("OPENCLAW_BASE_URL", "http://localhost:18789")
 OPENCLAW_TOKEN = os.environ.get("OPENCLAW_TOKEN", "")
+TRANSCRIBE_BASE_URL = os.environ.get("TRANSCRIBE_BASE_URL", OPENCLAW_BASE_URL)
+TRANSCRIBE_API_TOKEN = os.environ.get(
+    "TRANSCRIBE_API_TOKEN", OPENCLAW_TOKEN or OPENAI_API_KEY
+)
+TRANSCRIBE_HTTP_PATH = os.environ.get(
+    "TRANSCRIBE_HTTP_PATH", "/v1/audio/transcriptions"
+)
 TTS_BASE_URL = os.environ.get("TTS_BASE_URL", OPENCLAW_BASE_URL)
 TTS_API_TOKEN = os.environ.get("TTS_API_TOKEN", OPENCLAW_TOKEN or OPENAI_API_KEY)
 TTS_HTTP_PATH = os.environ.get("TTS_HTTP_PATH", "/v1/audio/speech")
@@ -31,7 +38,11 @@ AUDIO_OUTPUT_DEVICE = os.environ.get("AUDIO_OUTPUT_DEVICE", "default")
 AUDIO_OUTPUT_CARD = int(os.environ.get("AUDIO_OUTPUT_CARD", "0"))  # ALSA card for amixer
 AUDIO_SAMPLE_RATE = int(os.environ.get("AUDIO_SAMPLE_RATE", "16000"))
 
-DRY_RUN = not OPENAI_API_KEY
+_dry_run_env = os.environ.get("DRY_RUN")
+if _dry_run_env is None:
+    DRY_RUN = not (TRANSCRIBE_BASE_URL and TRANSCRIBE_API_TOKEN)
+else:
+    DRY_RUN = _dry_run_env.lower() in ("true", "1", "yes")
 
 LCD_BACKLIGHT = int(os.environ.get("LCD_BACKLIGHT", "70"))
 UI_MAX_FPS = int(os.environ.get("UI_MAX_FPS", "4"))
@@ -53,6 +64,9 @@ def print_config():
     print(f"OPENAI_TTS_VOICE        = {OPENAI_TTS_VOICE}")
     print(f"OPENAI_TTS_SPEED        = {OPENAI_TTS_SPEED}")
     print(f"OPENAI_TTS_GAIN_DB      = {OPENAI_TTS_GAIN_DB}")
+    print(f"TRANSCRIBE_BASE_URL     = {TRANSCRIBE_BASE_URL}")
+    print(f"TRANSCRIBE_HTTP_PATH    = {TRANSCRIBE_HTTP_PATH}")
+    print(f"TRANSCRIBE_API_TOKEN set= {bool(TRANSCRIBE_API_TOKEN)}")
     print(f"TTS_BASE_URL            = {TTS_BASE_URL}")
     print(f"TTS_HTTP_PATH           = {TTS_HTTP_PATH}")
     print(f"TTS_API_TOKEN set       = {bool(TTS_API_TOKEN)}")

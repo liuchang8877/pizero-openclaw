@@ -25,9 +25,9 @@ def _get_session() -> requests.Session:
 
 
 def transcribe(wav_path: str) -> str:
-    """Transcribe a WAV file using OpenAI Audio Transcriptions API.
+    """Transcribe a WAV file using a gateway-compatible transcription endpoint.
 
-    In dry-run mode (no OPENAI_API_KEY), prompts for typed input instead.
+    In dry-run mode, prompts for typed input instead.
     """
     if config.DRY_RUN:
         print("[transcribe] DRY RUN — type your message:")
@@ -43,8 +43,10 @@ def transcribe(wav_path: str) -> str:
     if file_size < 100:
         raise ValueError(f"WAV file too small ({file_size} bytes), likely empty recording")
 
-    url = "https://api.openai.com/v1/audio/transcriptions"
-    headers = {"Authorization": f"Bearer {config.OPENAI_API_KEY}"}
+    url = f"{config.TRANSCRIBE_BASE_URL.rstrip('/')}{config.TRANSCRIBE_HTTP_PATH}"
+    headers = {}
+    if config.TRANSCRIBE_API_TOKEN:
+        headers["Authorization"] = f"Bearer {config.TRANSCRIBE_API_TOKEN}"
 
     with open(wav_path, "rb") as f:
         try:
@@ -66,6 +68,12 @@ def transcribe(wav_path: str) -> str:
             f"Transcription failed ({resp.status_code}): {resp.text[:300]}"
         )
 
-    transcript = resp.text.strip()
+    content_type = (resp.headers.get("content-type") or "").lower()
+    if "application/json" in content_type:
+        payload = resp.json()
+        transcript = str(payload.get("text", "")).strip()
+    else:
+        transcript = resp.text.strip()
+
     print(f"[transcribe] result: {transcript[:120]}")
     return transcript

@@ -29,6 +29,7 @@ TRANSCRIBE_API_TOKEN = os.environ.get(
 TRANSCRIBE_HTTP_PATH = os.environ.get(
     "TRANSCRIBE_HTTP_PATH", "/v1/audio/transcriptions"
 )
+TRANSCRIBE_LANGUAGE = os.environ.get("TRANSCRIBE_LANGUAGE", "").strip()
 TTS_BASE_URL = os.environ.get("TTS_BASE_URL", OPENCLAW_BASE_URL)
 TTS_API_TOKEN = os.environ.get("TTS_API_TOKEN", OPENCLAW_TOKEN or OPENAI_API_KEY)
 TTS_HTTP_PATH = os.environ.get("TTS_HTTP_PATH", "/v1/audio/speech")
@@ -66,6 +67,7 @@ def print_config():
     print(f"OPENAI_TTS_GAIN_DB      = {OPENAI_TTS_GAIN_DB}")
     print(f"TRANSCRIBE_BASE_URL     = {TRANSCRIBE_BASE_URL}")
     print(f"TRANSCRIBE_HTTP_PATH    = {TRANSCRIBE_HTTP_PATH}")
+    print(f"TRANSCRIBE_LANGUAGE     = {TRANSCRIBE_LANGUAGE or '(auto)'}")
     print(f"TRANSCRIBE_API_TOKEN set= {bool(TRANSCRIBE_API_TOKEN)}")
     print(f"TTS_BASE_URL            = {TTS_BASE_URL}")
     print(f"TTS_HTTP_PATH           = {TTS_HTTP_PATH}")

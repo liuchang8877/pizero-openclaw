@@ -49,15 +49,18 @@ def transcribe(wav_path: str) -> str:
         headers["Authorization"] = f"Bearer {config.TRANSCRIBE_API_TOKEN}"
 
     with open(wav_path, "rb") as f:
+        form_data = {
+            "model": config.OPENAI_TRANSCRIBE_MODEL,
+            "response_format": "text",
+        }
+        if config.TRANSCRIBE_LANGUAGE:
+            form_data["language"] = config.TRANSCRIBE_LANGUAGE
         try:
             resp = _get_session().post(
                 url,
                 headers=headers,
                 files={"file": ("utterance.wav", f, "audio/wav")},
-                data={
-                    "model": config.OPENAI_TRANSCRIBE_MODEL,
-                    "response_format": "text",
-                },
+                data=form_data,
                 timeout=30,
             )
         except (requests.ConnectionError, requests.Timeout) as e:

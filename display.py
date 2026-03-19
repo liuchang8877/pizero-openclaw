@@ -22,8 +22,28 @@ except ImportError:
     sys.path.append("/home/pi/Whisplay/Driver")
     from WhisPlay import WhisPlayBoard  # pyright: ignore[reportMissingImports]
 
-_FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
-_FONT_PATH_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"
+_TEXT_FONT_PATHS_BOLD = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Bold.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/arphic/ukai.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+]
+_TEXT_FONT_PATHS_REGULAR = [
+    "/usr/share/fonts/opentype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/opentype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSansCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/noto/NotoSerifCJK-Regular.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-zenhei.ttc",
+    "/usr/share/fonts/truetype/wqy/wqy-microhei.ttc",
+    "/usr/share/fonts/truetype/arphic/ukai.ttc",
+    "/usr/share/fonts/truetype/arphic/uming.ttc",
+    "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
+]
 _EMOJI_FONT_PATHS = [
     "/usr/share/fonts/opentype/noto/NotoColorEmoji.ttf",
     "/usr/share/fonts/truetype/noto/NotoEmoji-Regular.ttf",
@@ -54,6 +74,20 @@ def _load_emoji_font(size: int) -> ImageFont.FreeTypeFont | None:
             # e.g. Noto Color Emoji: "invalid pixel size" (fixed-size font)
             continue
     return None
+
+
+def _load_text_font(
+    size: int,
+    candidates: list[str],
+) -> tuple[ImageFont.FreeTypeFont, str]:
+    for path in candidates:
+        if not os.path.exists(path):
+            continue
+        try:
+            return ImageFont.truetype(path, size), path
+        except OSError:
+            continue
+    raise OSError(f"No usable text font found for size {size}: {candidates}")
 
 
 def _is_emoji(c: str) -> bool:
@@ -448,17 +482,32 @@ class Display:
         self._width = self.board.LCD_WIDTH
         self._height = self.board.LCD_HEIGHT
 
-        self._status_font = ImageFont.truetype(_FONT_PATH, STATUS_FONT_SIZE)
-        self._status_sub_font = ImageFont.truetype(_FONT_PATH_REGULAR, STATUS_SUB_FONT_SIZE)
-        self._response_font = ImageFont.truetype(_FONT_PATH_REGULAR, RESPONSE_FONT_SIZE)
-        self._title_font = ImageFont.truetype(_FONT_PATH, TITLE_FONT_SIZE)
+        self._status_font, self._font_path_bold = _load_text_font(
+            STATUS_FONT_SIZE, _TEXT_FONT_PATHS_BOLD,
+        )
+        self._status_sub_font, self._font_path_regular = _load_text_font(
+            STATUS_SUB_FONT_SIZE, _TEXT_FONT_PATHS_REGULAR,
+        )
+        self._response_font, _ = _load_text_font(
+            RESPONSE_FONT_SIZE, _TEXT_FONT_PATHS_REGULAR,
+        )
+        self._title_font, _ = _load_text_font(
+            TITLE_FONT_SIZE, _TEXT_FONT_PATHS_BOLD,
+        )
         try:
-            self._battery_font = ImageFont.truetype(_FONT_PATH_REGULAR, BATTERY_FONT_SIZE)
+            self._battery_font, _ = _load_text_font(
+                BATTERY_FONT_SIZE, _TEXT_FONT_PATHS_REGULAR,
+            )
         except OSError:
             self._battery_font = self._status_sub_font  # fallback so battery corner still draws
-        self._clock_font = ImageFont.truetype(_FONT_PATH, CLOCK_FONT_SIZE)
+        self._clock_font, _ = _load_text_font(
+            CLOCK_FONT_SIZE, _TEXT_FONT_PATHS_BOLD,
+        )
         self._emoji_status = _load_emoji_font(STATUS_FONT_SIZE)
         self._emoji_response = _load_emoji_font(RESPONSE_FONT_SIZE)
+        print(
+            f"[display] text fonts: bold={self._font_path_bold}, regular={self._font_path_regular}"
+        )
 
         self._response_buf = ""
         self._last_draw_time = 0.0

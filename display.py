@@ -15,8 +15,12 @@ except ImportError:
 from PIL import Image, ImageDraw, ImageFont
 
 import config
-sys.path.append("/home/pi/Whisplay/Driver")
-from WhisPlay import WhisPlayBoard  # pyright: ignore[reportMissingImports]
+try:
+    # Prefer local project copy when present.
+    from WhisPlay import WhisPlayBoard  # pyright: ignore[reportMissingImports]
+except ImportError:
+    sys.path.append("/home/pi/Whisplay/Driver")
+    from WhisPlay import WhisPlayBoard  # pyright: ignore[reportMissingImports]
 
 _FONT_PATH = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"
 _FONT_PATH_REGULAR = "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf"

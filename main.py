@@ -19,9 +19,9 @@ logging.basicConfig(
 log = logging.getLogger("openclaw")
 from display import Display
 from record_audio import Recorder, check_audio_level
-from transcribe_openai import transcribe
 from openclaw_client import stream_response
 from button_ptt import ButtonPTT, State
+from stt_client import create_stt_client
 from tts_openai import TTSPlayer
 
 
@@ -51,9 +51,19 @@ class Assistant:
         self._state_entered_at = 0.0
         self._tts = TTSPlayer() if config.ENABLE_TTS else None
         self._conversation_history: list[dict] = []
+        self._stt = create_stt_client()
+        self._realtime_session = None
+        self._realtime_audio_thread: threading.Thread | None = None
+        self._realtime_audio_error: Exception | None = None
+        self._realtime_partial_text = ""
+        self._realtime_started_at = 0.0
+        self._realtime_first_partial_logged = False
 
     def _is_stale(self, my_gen: int) -> bool:
         return self._worker_gen != my_gen
+
+    def _is_realtime_stt_enabled(self) -> bool:
+        return config.STT_MODE == "realtime"
 
     def _touch(self):
         self._last_activity = time.monotonic()
@@ -66,6 +76,7 @@ class Assistant:
         self._touch()
         self._worker_gen += 1
         self._dismiss.set()
+        self._cancel_realtime_session()
         self.display.stop_spinner()
         self.display.stop_character()
         if self._tts:
@@ -76,6 +87,7 @@ class Assistant:
     def _on_abort_listening(self):
         """Called when user presses again while in LISTENING (stuck or abort): stop recorder, go Ready."""
         self.recorder.cancel()
+        self._cancel_realtime_session()
         self.display.stop_character()
         self._go_idle()
         log.info("abort listening -- back to Ready")
@@ -94,7 +106,10 @@ class Assistant:
                 accent_color=(60, 140, 255),
             )
         try:
-            self.recorder.start()
+            if self._is_realtime_stt_enabled():
+                self._start_realtime_capture()
+            else:
+                self.recorder.start()
         except Exception as e:
             log.error("recording start failed: %s", e)
             self._show_error(str(e))
@@ -124,12 +139,17 @@ class Assistant:
 
     def _process_utterance_inner(self, my_gen: int):
         # --- Stop recording ---
-        wav_path = self.recorder.stop()
+        if self._is_realtime_stt_enabled() and self.recorder.mode == "streaming":
+            wav_path = self.recorder.stop_streaming()
+            self._wait_for_realtime_audio_thread()
+        else:
+            wav_path = self.recorder.stop()
 
         # --- Silence gate ---
         rms = check_audio_level(wav_path)
         if rms < config.SILENCE_RMS_THRESHOLD:
             log.info("silence detected (RMS=%.0f), skipping", rms)
+            self._cancel_realtime_session()
             if self._is_stale(my_gen):
                 return
             self.display.stop_character()
@@ -145,6 +165,7 @@ class Assistant:
             return
 
         if self._is_stale(my_gen):
+            self._cancel_realtime_session()
             return
 
         # --- Transcribe ---
@@ -160,7 +181,7 @@ class Assistant:
                 accent_color=(255, 180, 0),
             )
         t0 = time.monotonic()
-        transcript = transcribe(wav_path)
+        transcript = self._transcribe_utterance(wav_path)
         log.info("transcribe took %.1fs => %r", time.monotonic() - t0, (transcript[:80] if transcript else "(empty)"))
 
         if not transcript or self._is_stale(my_gen):
@@ -247,6 +268,130 @@ class Assistant:
             log.info("display timeout, returning to idle")
 
         self._go_idle()
+
+    def _start_realtime_capture(self):
+        self._realtime_audio_error = None
+        self._realtime_partial_text = ""
+        self._realtime_started_at = time.monotonic()
+        self._realtime_first_partial_logged = False
+        try:
+            self._realtime_session = self._stt.start_realtime_session(on_partial=self._on_realtime_partial)
+            log.info("stt session.start ok in %.0fms", (time.monotonic() - self._realtime_started_at) * 1000)
+        except Exception as exc:
+            if config.REALTIME_STT_FALLBACK_TO_ONESHOT:
+                log.warning("realtime STT session start failed, falling back to one-shot: %s", exc)
+                self._realtime_session = None
+                self.recorder.start()
+                return
+            raise
+
+        if self._realtime_session is None:
+            self.recorder.start()
+            return
+
+        self.recorder.start_streaming()
+        self._realtime_audio_thread = threading.Thread(
+            target=self._stream_audio_to_realtime_stt,
+            daemon=True,
+        )
+        self._realtime_audio_thread.start()
+
+    def _stream_audio_to_realtime_stt(self):
+        session = self._realtime_session
+        if session is None:
+            return
+        chunk_count = 0
+        total_bytes = 0
+        try:
+            for chunk in self.recorder.iter_pcm_chunks(config.REALTIME_STT_CHUNK_MS):
+                if session is not self._realtime_session:
+                    break
+                chunk_count += 1
+                total_bytes += len(chunk)
+                session.append_audio_chunk(chunk)
+            log.info(
+                "stt audio.append done: %d chunks, %d bytes, ~%.1fs audio",
+                chunk_count,
+                total_bytes,
+                (total_bytes / max(1, config.AUDIO_SAMPLE_RATE * 2)),
+            )
+        except Exception as exc:
+            self._realtime_audio_error = exc
+
+    def _wait_for_realtime_audio_thread(self):
+        thread = self._realtime_audio_thread
+        self._realtime_audio_thread = None
+        if thread is not None:
+            thread.join(timeout=5)
+
+    def _cancel_realtime_session(self):
+        session = self._realtime_session
+        self._realtime_session = None
+        self._wait_for_realtime_audio_thread()
+        if session is not None:
+            try:
+                session.cancel()
+            except Exception as exc:
+                log.warning("realtime STT cancel failed: %s", exc)
+        self._realtime_audio_error = None
+        self._realtime_partial_text = ""
+        self._realtime_started_at = 0.0
+        self._realtime_first_partial_logged = False
+
+    def _on_realtime_partial(self, text: str):
+        self._realtime_partial_text = text
+        if text and not self._realtime_first_partial_logged and self._realtime_started_at:
+            log.info("stt first partial after %.0fms => %r", (time.monotonic() - self._realtime_started_at) * 1000, text[:80])
+            self._realtime_first_partial_logged = True
+        if not config.REALTIME_STT_SHOW_PARTIAL or self._tts or self.ptt.state != State.LISTENING:
+            return
+        self.display.set_status(
+            "Listening...",
+            color=(140, 200, 255),
+            subtitle=text or "Speak now",
+            accent_color=(60, 140, 255),
+        )
+
+    def _transcribe_utterance(self, wav_path: str) -> str:
+        session = self._realtime_session
+        self._realtime_session = None
+        if session is None:
+            return self._stt.transcribe_file(wav_path)
+
+        if self._realtime_audio_error is not None:
+            err = self._realtime_audio_error
+            self._realtime_audio_error = None
+            try:
+                session.cancel()
+            except Exception:
+                pass
+            if config.REALTIME_STT_FALLBACK_TO_ONESHOT:
+                log.warning("realtime audio streaming failed, falling back to one-shot: %s", err)
+                return self._stt.transcribe_file(wav_path)
+            raise err
+
+        try:
+            commit_started_at = time.monotonic()
+            transcript = session.finish().strip()
+            log.info(
+                "stt session.commit returned in %.0fms => %r",
+                (time.monotonic() - commit_started_at) * 1000,
+                transcript[:80],
+            )
+            self._realtime_audio_error = None
+            self._realtime_partial_text = ""
+            self._realtime_started_at = 0.0
+            self._realtime_first_partial_logged = False
+            return transcript
+        except Exception as exc:
+            self._realtime_audio_error = None
+            self._realtime_partial_text = ""
+            self._realtime_started_at = 0.0
+            self._realtime_first_partial_logged = False
+            if config.REALTIME_STT_FALLBACK_TO_ONESHOT:
+                log.warning("realtime commit failed, falling back to one-shot: %s", exc)
+                return self._stt.transcribe_file(wav_path)
+            raise
 
     def _go_idle(self):
         self._last_activity = time.monotonic()

@@ -3,8 +3,8 @@ import os
 import signal
 import struct
 import subprocess
-import time
 import wave
+from collections.abc import Iterator
 
 import config
 
@@ -53,10 +53,16 @@ def _dump_audio_info():
 class Recorder:
     def __init__(self):
         self._proc: subprocess.Popen | None = None
+        self._mode: str | None = None
+        self._captured_chunks: list[bytes] = []
 
     @property
     def is_recording(self) -> bool:
         return self._proc is not None and self._proc.poll() is None
+
+    @property
+    def mode(self) -> str | None:
+        return self._mode
 
     def start(self) -> None:
         if self.is_recording:
@@ -80,6 +86,7 @@ class Recorder:
                 stdout=subprocess.DEVNULL,
                 stderr=subprocess.PIPE,
             )
+            self._mode = "file"
             print(f"[rec] started: {' '.join(cmd)}")
         except FileNotFoundError:
             print("[rec] ERROR: arecord not found — install alsa-utils")
@@ -88,6 +95,55 @@ class Recorder:
         except Exception:
             _dump_audio_info()
             raise
+
+    def start_streaming(self) -> None:
+        if self.is_recording:
+            return
+
+        if os.path.exists(WAV_PATH):
+            os.remove(WAV_PATH)
+        self._captured_chunks = []
+
+        cmd = [
+            "arecord",
+            "-D", config.AUDIO_DEVICE,
+            "-f", "S16_LE",
+            "-r", str(config.AUDIO_SAMPLE_RATE),
+            "-c", "1",
+            "-t", "raw",
+        ]
+        try:
+            self._proc = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+            )
+            self._mode = "streaming"
+            print(f"[rec] started streaming: {' '.join(cmd)}")
+        except FileNotFoundError:
+            print("[rec] ERROR: arecord not found — install alsa-utils")
+            _dump_audio_info()
+            raise
+        except Exception:
+            _dump_audio_info()
+            raise
+
+    def iter_pcm_chunks(self, chunk_ms: int) -> Iterator[bytes]:
+        proc = self._proc
+        if proc is None or self._mode != "streaming" or proc.stdout is None:
+            raise RuntimeError("Recorder is not in streaming mode.")
+
+        bytes_per_ms = max(1, (config.AUDIO_SAMPLE_RATE * 2) // 1000)
+        chunk_size = max(bytes_per_ms, bytes_per_ms * max(1, chunk_ms))
+
+        while True:
+            chunk = proc.stdout.read(chunk_size)
+            if not chunk:
+                break
+            self._captured_chunks.append(chunk)
+            yield chunk
+            if len(chunk) < chunk_size and proc.poll() is not None:
+                break
 
     def stop(self) -> str:
         """Stop recording. Returns path to the WAV file."""
@@ -115,6 +171,7 @@ class Recorder:
                 pass
 
         self._proc = None
+        self._mode = None
 
         if not os.path.exists(WAV_PATH) or os.path.getsize(WAV_PATH) < 100:
             print(f"[rec] WARNING: WAV file missing or too small")
@@ -123,6 +180,49 @@ class Recorder:
             _dump_audio_info()
 
         return WAV_PATH
+
+    def stop_streaming(self) -> str:
+        proc = self._proc
+        if proc is None:
+            return WAV_PATH
+
+        try:
+            proc.send_signal(signal.SIGINT)
+        except OSError:
+            pass
+
+        try:
+            proc.wait(timeout=3)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+            proc.wait(timeout=2)
+
+        stderr = ""
+        if proc.stderr:
+            try:
+                stderr = proc.stderr.read().decode(errors="replace")
+            except Exception:
+                pass
+
+        self._proc = None
+        self._mode = None
+        self._write_stream_capture_wav()
+
+        if not os.path.exists(WAV_PATH) or os.path.getsize(WAV_PATH) < 100:
+            print(f"[rec] WARNING: WAV file missing or too small")
+            if stderr:
+                print(f"[rec] stderr: {stderr}")
+            _dump_audio_info()
+
+        return WAV_PATH
+
+    def _write_stream_capture_wav(self) -> None:
+        raw = b"".join(self._captured_chunks)
+        with wave.open(WAV_PATH, "wb") as wf:
+            wf.setnchannels(1)
+            wf.setsampwidth(2)
+            wf.setframerate(config.AUDIO_SAMPLE_RATE)
+            wf.writeframes(raw)
 
     def cancel(self) -> None:
         """Kill recording without caring about output."""
@@ -138,3 +238,4 @@ class Recorder:
         except Exception:
             pass
         self._proc = None
+        self._mode = None

@@ -1,5 +1,10 @@
 import os
-from dotenv import load_dotenv
+
+try:
+    from dotenv import load_dotenv
+except ModuleNotFoundError:  # pragma: no cover - optional in minimal test environments
+    def load_dotenv():
+        return False
 
 load_dotenv()
 
@@ -30,6 +35,28 @@ TRANSCRIBE_HTTP_PATH = os.environ.get(
     "TRANSCRIBE_HTTP_PATH", "/v1/audio/transcriptions"
 )
 TRANSCRIBE_LANGUAGE = os.environ.get("TRANSCRIBE_LANGUAGE", "").strip()
+STT_MODE = os.environ.get("STT_MODE", "oneshot").strip().lower() or "oneshot"
+REALTIME_STT_BASE_URL = os.environ.get("REALTIME_STT_BASE_URL", OPENCLAW_BASE_URL)
+REALTIME_STT_API_TOKEN = os.environ.get(
+    "REALTIME_STT_API_TOKEN", OPENCLAW_TOKEN or TRANSCRIBE_API_TOKEN
+)
+REALTIME_STT_HTTP_PATH = os.environ.get(
+    "REALTIME_STT_HTTP_PATH", "/plugins/macos-say-tts/asr/realtime"
+)
+REALTIME_STT_LANGUAGE = os.environ.get("REALTIME_STT_LANGUAGE", TRANSCRIBE_LANGUAGE).strip()
+REALTIME_STT_CHUNK_MS = int(os.environ.get("REALTIME_STT_CHUNK_MS", "100"))
+REALTIME_STT_CONNECT_TIMEOUT_SECONDS = float(
+    os.environ.get("REALTIME_STT_CONNECT_TIMEOUT_SECONDS", "10")
+)
+REALTIME_STT_COMMIT_TIMEOUT_SECONDS = float(
+    os.environ.get("REALTIME_STT_COMMIT_TIMEOUT_SECONDS", "8")
+)
+REALTIME_STT_SHOW_PARTIAL = os.environ.get(
+    "REALTIME_STT_SHOW_PARTIAL", "true"
+).lower() in ("true", "1", "yes")
+REALTIME_STT_FALLBACK_TO_ONESHOT = os.environ.get(
+    "REALTIME_STT_FALLBACK_TO_ONESHOT", "true"
+).lower() in ("true", "1", "yes")
 TTS_BASE_URL = os.environ.get("TTS_BASE_URL", OPENCLAW_BASE_URL)
 TTS_API_TOKEN = os.environ.get("TTS_API_TOKEN", OPENCLAW_TOKEN or OPENAI_API_KEY)
 TTS_HTTP_PATH = os.environ.get("TTS_HTTP_PATH", "/v1/audio/speech")
@@ -69,6 +96,16 @@ def print_config():
     print(f"TRANSCRIBE_HTTP_PATH    = {TRANSCRIBE_HTTP_PATH}")
     print(f"TRANSCRIBE_LANGUAGE     = {TRANSCRIBE_LANGUAGE or '(auto)'}")
     print(f"TRANSCRIBE_API_TOKEN set= {bool(TRANSCRIBE_API_TOKEN)}")
+    print(f"STT_MODE                = {STT_MODE}")
+    print(f"REALTIME_STT_BASE_URL   = {REALTIME_STT_BASE_URL}")
+    print(f"REALTIME_STT_HTTP_PATH  = {REALTIME_STT_HTTP_PATH}")
+    print(f"REALTIME_STT_LANGUAGE   = {REALTIME_STT_LANGUAGE or '(auto)'}")
+    print(f"REALTIME_STT_CHUNK_MS   = {REALTIME_STT_CHUNK_MS}")
+    print(f"REALTIME_STT_CONNECT_S  = {REALTIME_STT_CONNECT_TIMEOUT_SECONDS}")
+    print(f"REALTIME_STT_COMMIT_S   = {REALTIME_STT_COMMIT_TIMEOUT_SECONDS}")
+    print(f"REALTIME_STT_SHOW_PARTIAL = {REALTIME_STT_SHOW_PARTIAL}")
+    print(f"REALTIME_STT_FALLBACK   = {REALTIME_STT_FALLBACK_TO_ONESHOT}")
+    print(f"REALTIME_STT_API_TOKEN set= {bool(REALTIME_STT_API_TOKEN)}")
     print(f"TTS_BASE_URL            = {TTS_BASE_URL}")
     print(f"TTS_HTTP_PATH           = {TTS_HTTP_PATH}")
     print(f"TTS_API_TOKEN set       = {bool(TTS_API_TOKEN)}")

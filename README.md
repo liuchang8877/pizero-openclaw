@@ -57,9 +57,17 @@ Edit `.env`:
 ```bash
 OPENCLAW_TOKEN="your-openclaw-gateway-token"
 OPENCLAW_BASE_URL="http://your-openclaw-host:18789"
+STT_MODE="realtime"
 TRANSCRIBE_BASE_URL="http://your-openclaw-host:18789"
 TRANSCRIBE_API_TOKEN="your-openclaw-gateway-token"
 TRANSCRIBE_HTTP_PATH="/v1/audio/transcriptions"
+REALTIME_STT_BASE_URL="http://your-openclaw-host:18789"
+REALTIME_STT_API_TOKEN="your-openclaw-gateway-token"
+REALTIME_STT_HTTP_PATH="/plugins/macos-say-tts/asr/realtime"
+REALTIME_STT_LANGUAGE="zh"
+REALTIME_STT_CHUNK_MS="100"
+REALTIME_STT_SHOW_PARTIAL="true"
+REALTIME_STT_FALLBACK_TO_ONESHOT="true"
 TTS_BASE_URL="http://your-openclaw-host:18789"
 TTS_API_TOKEN="your-openclaw-gateway-token"
 TTS_HTTP_PATH="/v1/audio/speech"
@@ -85,6 +93,16 @@ All settings are configured via environment variables (loaded from `.env`):
 | `TRANSCRIBE_BASE_URL` | `OPENCLAW_BASE_URL` | Base URL for the transcription endpoint |
 | `TRANSCRIBE_API_TOKEN` | `OPENCLAW_TOKEN` | Auth token for the transcription endpoint |
 | `TRANSCRIBE_HTTP_PATH` | `/v1/audio/transcriptions` | Transcription endpoint path |
+| `STT_MODE` | `oneshot` | `oneshot` or `realtime`; `realtime` streams PCM chunks to the plugin route |
+| `REALTIME_STT_BASE_URL` | `OPENCLAW_BASE_URL` | Base URL for the realtime STT action route |
+| `REALTIME_STT_API_TOKEN` | `OPENCLAW_TOKEN` | Auth token for the realtime STT route |
+| `REALTIME_STT_HTTP_PATH` | `/plugins/macos-say-tts/asr/realtime` | Realtime STT action route path |
+| `REALTIME_STT_LANGUAGE` | `TRANSCRIBE_LANGUAGE` | Preferred language hint for realtime STT |
+| `REALTIME_STT_CHUNK_MS` | `100` | PCM chunk duration sent to the realtime route |
+| `REALTIME_STT_CONNECT_TIMEOUT_SECONDS` | `10` | Timeout for `session.start` / `audio.append` calls |
+| `REALTIME_STT_COMMIT_TIMEOUT_SECONDS` | `8` | Timeout for `session.commit` |
+| `REALTIME_STT_SHOW_PARTIAL` | `true` | Show realtime partial transcript on the LCD while listening |
+| `REALTIME_STT_FALLBACK_TO_ONESHOT` | `true` | Fall back to one-shot transcription if realtime STT fails |
 | `TTS_BASE_URL` | `OPENCLAW_BASE_URL` | Base URL for the TTS endpoint |
 | `TTS_API_TOKEN` | `OPENCLAW_TOKEN` | Auth token for the TTS endpoint |
 | `TTS_HTTP_PATH` | `/v1/audio/speech` | TTS endpoint path |
@@ -126,8 +144,72 @@ Install [`openclaw-macos-say-tts-plugin`](/Users/chang/Documents/TONGY/pizero-op
 
 - `POST /v1/audio/transcriptions`
 - `POST /v1/audio/speech`
+- `POST /plugins/macos-say-tts/asr/realtime`
 
 That lets the Pi talk only to OpenClaw, while OpenClaw itself handles provider access for speech-to-text and text-to-speech.
+
+## Realtime STT
+
+When `STT_MODE=realtime`, the Pi changes from one-shot upload mode to chunked streaming:
+
+1. On button press, it creates a realtime STT session via `POST /plugins/macos-say-tts/asr/realtime`
+2. It records raw PCM audio and sends `audio.append` requests every `REALTIME_STT_CHUNK_MS`
+3. Partial transcripts can be shown on the LCD while the user is still speaking
+4. On button release, it sends `session.commit` and waits for the final transcript
+5. The final transcript is then sent to `POST /v1/responses`
+
+Important notes:
+
+- The current plugin route is an HTTP action session API, not a raw WebSocket endpoint
+- If realtime STT fails and `REALTIME_STT_FALLBACK_TO_ONESHOT=true`, the Pi falls back to the old one-shot transcription path
+- The Pi still writes `/tmp/utterance.wav` in realtime mode so silence detection and fallback keep working
+
+### Suggested first-pass realtime config
+
+Pi `.env`:
+
+```bash
+STT_MODE="realtime"
+REALTIME_STT_BASE_URL="http://your-openclaw-host:18789"
+REALTIME_STT_API_TOKEN="your-openclaw-gateway-token"
+REALTIME_STT_HTTP_PATH="/plugins/macos-say-tts/asr/realtime"
+REALTIME_STT_LANGUAGE="zh"
+REALTIME_STT_CHUNK_MS="100"
+REALTIME_STT_SHOW_PARTIAL="true"
+REALTIME_STT_FALLBACK_TO_ONESHOT="true"
+```
+
+OpenClaw plugin config:
+
+```json
+{
+  "plugins": {
+    "macos-say-tts": {
+      "enabled": true,
+      "transcriptionBackend": "doubao-realtime",
+      "doubaoAppId": "your-app-id",
+      "doubaoAccessToken": "your-access-token",
+      "doubaoWsUrl": "wss://openspeech.bytedance.com/api/v3/sauc/bigmodel",
+      "doubaoCluster": "your-cluster",
+      "doubaoLanguage": "zh",
+      "doubaoChunkMs": 100,
+      "doubaoEnableVad": true
+    }
+  }
+}
+```
+
+### Realtime debugging checklist
+
+- Pi side:
+  - watch `/tmp/openclaw.log`
+  - confirm `stt session.start`, `first partial`, `commit returned` timings
+- OpenClaw side:
+  - verify plugin health route reports `realtimeEnabled=true` and `realtimeConfigured=true`
+  - watch gateway logs for `doubao connected`, `first partial`, `session completed`
+- If realtime fails:
+  - confirm `REALTIME_STT_FALLBACK_TO_ONESHOT=true`
+  - check whether fallback one-shot transcription still succeeds
 
 ## Project structure
 
